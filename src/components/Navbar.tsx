@@ -84,7 +84,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           <nav className="flex space-x-1 overflow-x-auto pb-2 scrollbar-none border-t border-neutral-800 pt-2">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isActive =
+                activeTab === item.id ||
+                (item.id === 'project-team' && activeTab === 'demo');
               return (
                 <button
                   key={item.id}

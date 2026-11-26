@@ -161,6 +161,7 @@ static void output_full_json(
         printf("      \"billId\": \"%s\",\n", history[i].bill_id);
         printf("      \"month\": \"%s\",\n", history[i].month_name);
         printf("      \"year\": %d,\n", history[i].year);
+        printf("      \"dueDate\": \"%s\",\n", history[i].due_date);
         printf("      \"units\": %.2f,\n", history[i].units);
         printf("      \"amount\": %.2f,\n", history[i].total_amount);
         printf("      \"status\": \"%s\",\n", history[i].payment_status);
@@ -237,7 +238,7 @@ static void handle_calculate_command(const char* json_input) {
     
     double direct_u = 0.0;
     if (extract_json_num(json_input, "unitsConsumed", &direct_u)) {
-        if (direct_u > 0.0) {
+        if (direct_u >= 0.0) {
             meter.units_consumed = direct_u;
             meter.is_direct_units = 1;
         }
@@ -251,13 +252,14 @@ static void handle_calculate_command(const char* json_input) {
     const char* app_array = strstr(json_input, "\"appliances\"");
     if (app_array) {
         const char* p = strchr(app_array, '[');
-        if (p) {
+        const char* arr_end = p ? strchr(p, ']') : NULL;
+        if (p && arr_end) {
             p++;
-            while (*p && *p != ']' && app_count < MAX_APPLIANCES) {
+            while (*p && p < arr_end && app_count < MAX_APPLIANCES) {
                 const char* obj_start = strchr(p, '{');
-                if (!obj_start || obj_start > strchr(p, ']')) break;
+                if (!obj_start || obj_start > arr_end) break;
                 const char* obj_end = strchr(obj_start, '}');
-                if (!obj_end) break;
+                if (!obj_end || obj_end > arr_end) break;
 
                 char obj_str[512];
                 size_t len = obj_end - obj_start + 1;
@@ -281,14 +283,14 @@ static void handle_calculate_command(const char* json_input) {
         }
     }
 
-    /* If no appliances provided in input, supply a realistic default load */
-    if (app_count == 0) {
-        appliances[0] = (Appliance){ "1.5 Ton Inverter AC", 1500.0, 1, 6.0, 0, 0, 0 };
-        appliances[1] = (Appliance){ "Double Door Refrigerator", 250.0, 1, 14.0, 0, 0, 0 };
-        appliances[2] = (Appliance){ "Ceiling Fans", 75.0, 3, 10.0, 0, 0, 0 };
-        appliances[3] = (Appliance){ "LED Bulbs & Battens", 12.0, 8, 6.0, 0, 0, 0 };
-        appliances[4] = (Appliance){ "Storage Water Geyser", 2000.0, 1, 1.0, 0, 0, 0 };
-        appliances[5] = (Appliance){ "Smart LED TV 55-inch", 120.0, 1, 5.0, 0, 0, 0 };
+    /* If no appliances key provided in input, supply a realistic default load */
+    if (!app_array && app_count == 0) {
+        appliances[0] = (Appliance){ "Inverter AC", 1500.0, 1, 6.0, 0, 0, 0 };
+        appliances[1] = (Appliance){ "Refrigerator", 250.0, 1, 14.0, 0, 0, 0 };
+        appliances[2] = (Appliance){ "Fans", 75.0, 3, 10.0, 0, 0, 0 };
+        appliances[3] = (Appliance){ "led bulbs", 12.0, 8, 6.0, 0, 0, 0 };
+        appliances[4] = (Appliance){ "Water geyser", 2000.0, 1, 1.0, 0, 0, 0 };
+        appliances[5] = (Appliance){ "Smart TV", 120.0, 1, 5.0, 0, 0, 0 };
         app_count = 6;
     }
 
@@ -380,6 +382,10 @@ static void handle_save_command(const char* json_input) {
     double yr = 2026.0;
     extract_json_num(json_input, "year", &yr);
     record.year = (int)yr;
+    extract_json_str(json_input, "dueDate", record.due_date, sizeof(record.due_date));
+    if (strlen(record.due_date) == 0) {
+        strncpy(record.due_date, "30-Nov-2026", sizeof(record.due_date) - 1);
+    }
     extract_json_num(json_input, "units", &record.units);
     extract_json_num(json_input, "amount", &record.total_amount);
     extract_json_str(json_input, "status", record.payment_status, sizeof(record.payment_status));
@@ -407,6 +413,23 @@ static void handle_save_command(const char* json_input) {
     printf("}\n");
 }
 
+/* Delete a monthly bill record from CSV & Binary DB */
+static void handle_delete_command(const char* json_input) {
+    char bill_id[32] = "";
+    double row_index = -1.0;
+    extract_json_str(json_input, "billId", bill_id, sizeof(bill_id));
+    extract_json_num(json_input, "rowIndex", &row_index);
+
+    int res = delete_monthly_record(bill_id, (int)row_index);
+    printf("{\n");
+    printf("  \"status\": \"%s\",\n", res ? "success" : "error");
+    printf("  \"billId\": \"%s\",\n", bill_id);
+    printf("  \"message\": \"%s\"\n",
+           res ? "Paid bill record deleted from CSV and Binary Database."
+               : "Record not found in storage.");
+    printf("}\n");
+}
+
 /* History output */
 static void handle_history_command(void) {
     MonthlyRecord records[MAX_HISTORY];
@@ -422,6 +445,7 @@ static void handle_history_command(void) {
         printf("      \"billId\": \"%s\",\n", records[i].bill_id);
         printf("      \"month\": \"%s\",\n", records[i].month_name);
         printf("      \"year\": %d,\n", records[i].year);
+        printf("      \"dueDate\": \"%s\",\n", records[i].due_date);
         printf("      \"units\": %.2f,\n", records[i].units);
         printf("      \"amount\": %.2f,\n", records[i].total_amount);
         printf("      \"status\": \"%s\",\n", records[i].payment_status);
@@ -450,28 +474,28 @@ static void run_interactive_demo(void) {
     printf("Consumer ID:  %s\n", cust.consumer_id);
     printf("Address:      %s\n", cust.address);
     printf("Category:     %s\n", cust.category);
-    printf("Budget:       $%.2f\n", cust.budget);
+    printf("Budget:       Rs. %.2f\n", cust.budget);
     printf("Units Consumed: %.1f kWh (Prev: %.1f, Curr: %.1f)\n\n",
            bill.meter.units_consumed, meter.prev_reading, meter.curr_reading);
 
     printf("[SLAB-WISE BREAKDOWN]\n");
     printf("---------------------------------------------------------------\n");
-    printf(" Slab Range          Rate/Unit   Units in Slab   Amount ($/Rs) \n");
+    printf(" Slab Range          Rate/Unit   Units in Slab   Amount (Rs.)  \n");
     printf("---------------------------------------------------------------\n");
     for (int i = 0; i < bill.num_slabs; i++) {
-        printf(" %-18s  $%-8.2f   %-13.1f   $%-12.2f\n",
+        printf(" %-18s  Rs.%-7.2f  %-13.1f   Rs.%-11.2f\n",
                bill.slabs[i].label, bill.slabs[i].rate_per_unit,
                bill.slabs[i].units_in_slab, bill.slabs[i].amount);
     }
     printf("---------------------------------------------------------------\n");
-    printf(" Energy Charges:        $%.2f\n", bill.energy_charges);
-    printf(" Fixed Charges:         $%.2f\n", bill.fixed_charges);
-    printf(" Regulatory Surcharge:  $%.2f\n", bill.regulatory_surcharge);
-    printf(" Electricity Duty (8%%): $%.2f\n", bill.electricity_duty);
-    printf(" Fuel Surcharge (FCA):  $%.2f\n", bill.fuel_surcharge);
-    printf(" Green/Prompt Rebate:  -$%.2f\n", bill.green_rebate);
+    printf(" Energy Charges:        Rs. %.2f\n", bill.energy_charges);
+    printf(" Fixed Charges:         Rs. %.2f\n", bill.fixed_charges);
+    printf(" Regulatory Surcharge:  Rs. %.2f\n", bill.regulatory_surcharge);
+    printf(" Electricity Duty (8%%): Rs. %.2f\n", bill.electricity_duty);
+    printf(" Fuel Surcharge (FCA):  Rs. %.2f\n", bill.fuel_surcharge);
+    printf(" Green/Prompt Rebate:  -Rs. %.2f\n", bill.green_rebate);
     printf("---------------------------------------------------------------\n");
-    printf(" TOTAL PAYABLE:         $%.2f\n", bill.total_payable);
+    printf(" TOTAL PAYABLE:         Rs. %.2f\n", bill.total_payable);
     printf(" Due Date:              %s\n", bill.due_date);
     printf(" Status:                %s\n", bill.payment_status);
     printf("===============================================================\n");
@@ -506,6 +530,16 @@ int main(int argc, char* argv[]) {
             size_t bytes = fread(buffer, 1, sizeof(buffer) - 1, stdin);
             buffer[bytes] = '\0';
             handle_save_command(buffer);
+        }
+        return 0;
+    } else if (strcmp(argv[1], "--delete") == 0) {
+        if (argc >= 3) {
+            handle_delete_command(argv[2]);
+        } else {
+            char buffer[4096];
+            size_t bytes = fread(buffer, 1, sizeof(buffer) - 1, stdin);
+            buffer[bytes] = '\0';
+            handle_delete_command(buffer);
         }
         return 0;
     } else if (strcmp(argv[1], "--calculate") == 0) {

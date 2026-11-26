@@ -1,1 +1,4 @@
-bill_id,month_name,year,units,total_amount,payment_status,category
+bill_id,month_name,year,due_date,units,total_amount,payment_status,category
+EB-202608-3420,August 2026,2026,15-Sep-2026,340.00,2340.30,Paid,Domestic
+EB-202609-2950,September 2026,2026,15-Oct-2026,295.00,1949.93,Paid,Domestic
+EB-202610-2800,October 2026,2026,15-Nov-2026,280.00,1819.80,Paid,Domestic

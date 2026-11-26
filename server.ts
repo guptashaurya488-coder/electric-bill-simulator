@@ -84,6 +84,25 @@ app.post('/api/save-record', async (req, res) => {
   }
 });
 
+// API: Delete Record from C DB (CSV & Binary)
+app.post('/api/delete-record', async (req, res) => {
+  try {
+    const billId = typeof req.body?.billId === 'string' ? req.body.billId.trim() : '';
+    if (!billId) {
+      return res.status(400).json({ status: 'error', message: 'Valid billId is required' });
+    }
+    const rowIndex = Number.isInteger(req.body?.rowIndex) ? req.body.rowIndex : -1;
+    const payload = JSON.stringify({ billId, rowIndex });
+    const { stdout, executionTimeMs } = await runCBinary(['--delete', payload]);
+    const parsed = JSON.parse(stdout);
+    parsed.executionTimeMs = executionTimeMs;
+    res.json(parsed);
+  } catch (error: any) {
+    console.error('Delete error:', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
 // API: Compare Tariffs
 app.get('/api/compare-tariffs', async (req, res) => {
   try {

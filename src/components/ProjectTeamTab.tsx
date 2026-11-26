@@ -1,6 +1,11 @@
 import React from 'react';
+import { Play } from 'lucide-react';
 
-export const ProjectTeamTab: React.FC = () => {
+interface ProjectTeamTabProps {
+  onOpenDemo: () => void;
+}
+
+export const ProjectTeamTab: React.FC<ProjectTeamTabProps> = ({ onOpenDemo }) => {
   return (
     <div className="max-w-4xl mx-auto py-4 space-y-6">
       {/* Project Title Header */}
@@ -52,6 +57,18 @@ export const ProjectTeamTab: React.FC = () => {
             </h2>
           </div>
         </div>
+      </div>
+
+      {/* Orange Demo Button */}
+      <div className="flex justify-center pt-2">
+        <button
+          type="button"
+          onClick={onOpenDemo}
+          className="inline-flex items-center gap-2.5 px-8 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 active:bg-orange-700 text-white font-semibold text-sm tracking-wide transition-colors border border-orange-500/40 cursor-pointer shadow-lg shadow-orange-950/40 whitespace-nowrap shrink-0"
+        >
+          <Play className="w-4 h-4 fill-current" />
+          <span>Demo</span>
+        </button>
       </div>
     </div>
   );

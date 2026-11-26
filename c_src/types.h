@@ -85,6 +85,7 @@ typedef struct {
     char bill_id[32];
     char month_name[24];
     int year;
+    char due_date[20];
     double units;
     double total_amount;
     char payment_status[16];

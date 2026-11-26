@@ -76,6 +76,7 @@ export interface MonthlyRecord {
   billId: string;
   month: string;
   year: number;
+  dueDate: string;
   units: number;
   amount: number;
   status: string;

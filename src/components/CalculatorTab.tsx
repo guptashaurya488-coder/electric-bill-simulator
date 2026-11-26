@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CustomerInfo, MeterData, CalculationResult } from '../types/billing';
 import { Calculator, Save, AlertTriangle, CheckCircle2, Pencil, UserCheck, CheckCircle, Clock } from 'lucide-react';
 
@@ -12,6 +12,7 @@ interface CalculatorTabProps {
   onCalculate: () => void;
   onSaveRecord: () => void;
   onTogglePaymentStatus: () => void;
+  onBudgetChange: (newBudget: number) => void;
   isCalculating: boolean;
   isSaving: boolean;
   saveMessage: string | null;
@@ -29,6 +30,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   onCalculate,
   onSaveRecord,
   onTogglePaymentStatus,
+  onBudgetChange,
   isCalculating,
   isSaving,
   saveMessage,
@@ -36,8 +38,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   onEditCustomer,
 }) => {
   const [directUnitsInput, setDirectUnitsInput] = useState<string>(
-    meter.unitsConsumed > 0 ? meter.unitsConsumed.toString() : '350'
+    meter.unitsConsumed >= 0 ? meter.unitsConsumed.toFixed(1) : '350'
   );
+
+  useEffect(() => {
+    setDirectUnitsInput(meter.unitsConsumed.toFixed(1));
+  }, [meter.unitsConsumed]);
 
   const currencySymbol = '₹';
 
@@ -103,10 +109,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 <span className="text-slate-200 mt-0.5 block">{customer.address}</span>
               </div>
               <div className="bg-black p-3 rounded-lg border border-neutral-800">
-                <span className="text-[10px] uppercase tracking-wider text-slate-500 block">Monthly Budget Limit</span>
-                <span className="font-mono font-semibold text-emerald-400 mt-0.5 block">
-                  {currencySymbol}{customer.budget.toFixed(2)}
-                </span>
+                <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">
+                  Monthly Budget Limit ({currencySymbol})
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={customer.budget || ''}
+                  onChange={(e) => onBudgetChange(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-black border border-neutral-700 rounded px-2 py-1 font-mono font-semibold text-emerald-400 text-xs focus:outline-none focus:border-cyan-500"
+                />
               </div>
             </div>
           </div>

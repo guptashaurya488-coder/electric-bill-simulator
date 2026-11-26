@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { CustomerInfo, MeterData, ApplianceItem, CalculationResult } from './types/billing';
 import { Navbar } from './components/Navbar';
 import { CustomerDetailsPage } from './components/CustomerDetailsPage';
@@ -12,6 +12,9 @@ import { ApplianceAuditorTab } from './components/ApplianceAuditorTab';
 import { AnalyticsTab } from './components/AnalyticsTab';
 import { TariffComparisonTab } from './components/TariffComparisonTab';
 import { ProjectTeamTab } from './components/ProjectTeamTab';
+import { DemoPage } from './components/DemoPage';
+
+const STORAGE_KEY = 'smart_electricity_bill_state_v1';
 
 const INITIAL_CUSTOMER: CustomerInfo = {
   name: '',
@@ -38,26 +41,75 @@ const DEFAULT_APPLIANCES: ApplianceItem[] = [
   { name: 'Smart TV', watts: 120, quantity: 1, dailyHours: 5.0, monthlyKwh: 18.0, monthlyCost: 124.8, pctOfBill: 5.1 },
 ];
 
+function loadPersistedState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
+  const savedState = loadPersistedState();
+
   const [activeTab, setActiveTab] = useState<string>('calculator');
-  const [isDetailsCompleted, setIsDetailsCompleted] = useState<boolean>(false);
+  const [isDetailsCompleted, setIsDetailsCompleted] = useState<boolean>(
+    Boolean(savedState?.isDetailsCompleted && savedState?.customer?.name)
+  );
   const [isEditingCustomer, setIsEditingCustomer] = useState<boolean>(false);
 
   // Core Form State
-  const [customer, setCustomer] = useState<CustomerInfo>(INITIAL_CUSTOMER);
-  const [meter, setMeter] = useState<MeterData>(DEFAULT_METER);
-  const [tariffPlan, setTariffPlan] = useState<string>('Standard');
-  const [appliances, setAppliances] = useState<ApplianceItem[]>(DEFAULT_APPLIANCES);
+  const [customer, setCustomer] = useState<CustomerInfo>(savedState?.customer || INITIAL_CUSTOMER);
+  const [meter, setMeter] = useState<MeterData>(savedState?.meter || DEFAULT_METER);
+  const [tariffPlan, setTariffPlan] = useState<string>(savedState?.tariffPlan || 'Standard');
+  const [appliances, setAppliances] = useState<ApplianceItem[]>(savedState?.appliances || DEFAULT_APPLIANCES);
 
   // Calculation Result
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const initialMountCalculated = useRef(false);
+  const calcRequestIdRef = useRef(0);
+
+  // Persist user profile, budget, meter, tariff, and appliances whenever updated
+  useEffect(() => {
+    if (!isDetailsCompleted) return;
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          isDetailsCompleted,
+          customer,
+          meter,
+          tariffPlan,
+          appliances,
+        })
+      );
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [isDetailsCompleted, customer, meter, tariffPlan, appliances]);
 
   // Run calculation via C Backend API
-  const handleCalculate = useCallback(async (overrideCustomer?: CustomerInfo) => {
-    const activeCustomer = overrideCustomer || customer;
+  const handleCalculate = useCallback(async (overrides?: {
+    customer?: CustomerInfo;
+    meter?: MeterData;
+    tariffPlan?: string;
+    appliances?: ApplianceItem[];
+  }) => {
+    const activeCustomer = overrides?.customer || customer;
+    const activeMeter = overrides?.meter || meter;
+    const activePlan = overrides?.tariffPlan || tariffPlan;
+    const activeAppliances = overrides?.appliances ?? appliances;
+
+    const computedUnits = activeMeter.isDirectUnits
+      ? Math.max(0, activeMeter.unitsConsumed)
+      : Math.max(0, activeMeter.currReading - activeMeter.prevReading);
+
+    const requestId = ++calcRequestIdRef.current;
     setIsCalculating(true);
     setSaveMessage(null);
     try {
@@ -68,11 +120,11 @@ export default function App() {
         category: activeCustomer.category,
         billingMonth: activeCustomer.billingMonth,
         budget: activeCustomer.budget,
-        prevReading: meter.prevReading,
-        currReading: meter.currReading,
-        unitsConsumed: meter.isDirectUnits ? meter.unitsConsumed : (meter.currReading - meter.prevReading),
-        tariffPlan,
-        appliances: appliances.map(a => ({
+        prevReading: activeMeter.prevReading,
+        currReading: activeMeter.currReading,
+        unitsConsumed: computedUnits,
+        tariffPlan: activePlan,
+        appliances: activeAppliances.map(a => ({
           name: a.name,
           watts: a.watts,
           quantity: a.quantity,
@@ -88,6 +140,8 @@ export default function App() {
 
       if (!res.ok) throw new Error('Calculation request failed');
       const data: CalculationResult = await res.json();
+      if (requestId !== calcRequestIdRef.current) return;
+
       setResult(data);
 
       if (data.appliances?.items) {
@@ -96,16 +150,52 @@ export default function App() {
     } catch (err) {
       console.error('Error calculating bill with C engine:', err);
     } finally {
-      setIsCalculating(false);
+      if (requestId === calcRequestIdRef.current) {
+        setIsCalculating(false);
+      }
     }
   }, [customer, meter, tariffPlan, appliances]);
+
+  // Recalculate automatically on page load if persisted details exist
+  useEffect(() => {
+    if (isDetailsCompleted && !initialMountCalculated.current) {
+      initialMountCalculated.current = true;
+      handleCalculate();
+    }
+  }, [isDetailsCompleted, handleCalculate]);
 
   // Handle Customer & Account Details Form Submission
   const handleCustomerSubmit = (validatedCustomer: CustomerInfo) => {
     setCustomer(validatedCustomer);
     setIsDetailsCompleted(true);
     setIsEditingCustomer(false);
-    handleCalculate(validatedCustomer);
+    handleCalculate({ customer: validatedCustomer });
+  };
+
+  // Sync appliance changes directly into meter consumption & budget tracker
+  const handleAppliancesChange = (nextAppliances: ApplianceItem[]) => {
+    const totalAppKwh = nextAppliances.reduce(
+      (sum, a) => sum + (a.watts * a.quantity * a.dailyHours * 30) / 1000,
+      0
+    );
+    const roundedKwh = Math.round(totalAppKwh * 10) / 10;
+    const nextMeter: MeterData = {
+      prevReading: meter.prevReading,
+      currReading: Math.round((meter.prevReading + roundedKwh) * 10) / 10,
+      unitsConsumed: roundedKwh,
+      isDirectUnits: true,
+    };
+
+    setAppliances(nextAppliances);
+    setMeter(nextMeter);
+    handleCalculate({ appliances: nextAppliances, meter: nextMeter });
+  };
+
+  // Sync budget changes directly into C budget alert tracker
+  const handleBudgetChange = (newBudget: number) => {
+    const nextCustomer = { ...customer, budget: newBudget };
+    setCustomer(nextCustomer);
+    handleCalculate({ customer: nextCustomer });
   };
 
   // Toggle payment status on the active bill
@@ -134,6 +224,7 @@ export default function App() {
         billId: result.bill.billId,
         month: result.bill.customer.billingMonth,
         year: 2026,
+        dueDate: result.bill.dueDate,
         units: result.bill.meter.unitsConsumed,
         amount: result.bill.charges.totalPayable,
         status: 'Paid',
@@ -165,14 +256,28 @@ export default function App() {
     }
   };
 
+  // Delete a paid bill record from C CSV & Binary storage
+  const handleDeleteRecord = async (billId: string, rowIndex: number) => {
+    try {
+      const res = await fetch('/api/delete-record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ billId, rowIndex }),
+      });
+      if (!res.ok) throw new Error('Delete request failed');
+      await handleCalculate();
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
+  };
+
   // Select tariff from comparison tab
   const handleSelectTariffFromComparison = (plan: string, cat: 'Domestic' | 'Commercial') => {
-    setCustomer(prev => ({ ...prev, category: cat }));
+    const nextCustomer = { ...customer, category: cat };
+    setCustomer(nextCustomer);
     setTariffPlan(plan);
     setActiveTab('calculator');
-    setTimeout(() => {
-      handleCalculate();
-    }, 100);
+    handleCalculate({ customer: nextCustomer, tariffPlan: plan });
   };
 
   const avgRatePerKwh = result && result.bill.meter.unitsConsumed > 0
@@ -214,6 +319,7 @@ export default function App() {
                 onCalculate={() => handleCalculate()}
                 onSaveRecord={handleSaveRecord}
                 onTogglePaymentStatus={handleTogglePaymentStatus}
+                onBudgetChange={handleBudgetChange}
                 isCalculating={isCalculating}
                 isSaving={isSaving}
                 saveMessage={saveMessage}
@@ -225,8 +331,8 @@ export default function App() {
             {activeTab === 'appliances' && (
               <ApplianceAuditorTab
                 appliances={appliances}
-                setAppliances={setAppliances}
-                onRecalculate={() => handleCalculate()}
+                onAppliancesChange={handleAppliancesChange}
+                onRecalculate={() => handleAppliancesChange(appliances)}
                 avgRatePerKwh={avgRatePerKwh}
               />
             )}
@@ -238,6 +344,9 @@ export default function App() {
                 budgetAlert={result?.budgetAlert || null}
                 anomaly={result?.anomaly || null}
                 currentBill={result?.bill || null}
+                budget={customer.budget}
+                onBudgetChange={handleBudgetChange}
+                onDeleteRecord={handleDeleteRecord}
               />
             )}
 
@@ -249,7 +358,13 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'project-team' && <ProjectTeamTab />}
+            {activeTab === 'project-team' && (
+              <ProjectTeamTab onOpenDemo={() => setActiveTab('demo')} />
+            )}
+
+            {activeTab === 'demo' && (
+              <DemoPage onBack={() => setActiveTab('project-team')} />
+            )}
           </>
         )}
       </main>

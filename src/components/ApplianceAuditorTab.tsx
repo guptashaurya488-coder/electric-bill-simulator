@@ -4,7 +4,7 @@ import { Plus, Trash2, Zap } from 'lucide-react';
 
 interface ApplianceAuditorTabProps {
   appliances: ApplianceItem[];
-  setAppliances: React.Dispatch<React.SetStateAction<ApplianceItem[]>>;
+  onAppliancesChange: (nextAppliances: ApplianceItem[]) => void;
   onRecalculate: () => void;
   avgRatePerKwh: number;
 }
@@ -27,7 +27,7 @@ const PRESET_APPLIANCES = [
 
 export const ApplianceAuditorTab: React.FC<ApplianceAuditorTabProps> = ({
   appliances,
-  setAppliances,
+  onAppliancesChange,
   onRecalculate,
   avgRatePerKwh,
 }) => {
@@ -56,7 +56,7 @@ export const ApplianceAuditorTab: React.FC<ApplianceAuditorTabProps> = ({
       pctOfBill: 0,
     };
 
-    setAppliances(prev => [...prev, newApp]);
+    onAppliancesChange([...appliances, newApp]);
     setName('');
     setWatts(100);
     setQuantity(1);
@@ -70,25 +70,24 @@ export const ApplianceAuditorTab: React.FC<ApplianceAuditorTabProps> = ({
   };
 
   const handleDelete = (index: number) => {
-    setAppliances(prev => prev.filter((_, idx) => idx !== index));
+    onAppliancesChange(appliances.filter((_, idx) => idx !== index));
   };
 
   const handleUpdateHours = (index: number, newHours: number) => {
-    setAppliances(prev =>
-      prev.map((app, i) => {
-        if (i === index) {
-          const hours = Math.max(0, Math.min(24, newHours));
-          const monthlyKwh = (app.watts * app.quantity * hours * 30) / 1000;
-          return {
-            ...app,
-            dailyHours: hours,
-            monthlyKwh,
-            monthlyCost: monthlyKwh * (avgRatePerKwh || 6.5),
-          };
-        }
-        return app;
-      })
-    );
+    const next = appliances.map((app, i) => {
+      if (i === index) {
+        const hours = Math.max(0, Math.min(24, newHours));
+        const monthlyKwh = (app.watts * app.quantity * hours * 30) / 1000;
+        return {
+          ...app,
+          dailyHours: hours,
+          monthlyKwh,
+          monthlyCost: monthlyKwh * (avgRatePerKwh || 6.5),
+        };
+      }
+      return app;
+    });
+    onAppliancesChange(next);
   };
 
   const totalAppKwh = appliances.reduce((sum, a) => sum + a.monthlyKwh, 0);
